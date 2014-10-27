@@ -17,14 +17,10 @@
 */
 
 #define BLITZ_DEBUG 0 
-#define BLITZ_VERSION_STRING "0.8.14"
+#define BLITZ_VERSION_STRING "0.8.15"
 
 #ifndef PHP_WIN32
 #include <sys/mman.h>
-#endif
-
-#ifdef HAVE_CONFIG_H
-#include "config.h"
 #endif
 
 #include "php.h"
@@ -75,6 +71,7 @@ static int blitz_exec_nodes_ex(blitz_tpl *tpl, blitz_node *first, zval *id,
 static inline int blitz_analize (blitz_tpl *tpl TSRMLS_DC);
 static inline void blitz_remove_spaces_around_context_tags(blitz_tpl *tpl TSRMLS_DC);
 static inline unsigned int blitz_extract_var(blitz_tpl *tpl, char *name, unsigned long len, unsigned char is_path, zval *params, long *l, zval ***z TSRMLS_DC);
+static inline char blitz_get_autoescape(blitz_tpl *tpl TSRMLS_DC);
 
 static int le_blitz;
 
@@ -2898,6 +2895,19 @@ static inline int blitz_exec_user_method(blitz_tpl *tpl, blitz_node *node, zval 
 }
 /* }}} */
 
+/* {{{ char blitz_get_autoescape(blitz_tpl *tpl TSRMLS_DC) */
+static inline char blitz_get_autoescape(blitz_tpl *tpl TSRMLS_DC)
+{
+  if(tpl) {
+    if (tpl->flags & BLITZ_FLAG_AUTOESCAPE_OVERWRITE) {
+        return tpl->flags & BLITZ_FLAG_AUTOESCAPE_VALUE;
+    }
+  }
+
+  return BLITZ_G(auto_escape);
+}
+/* }}} */
+
 /* {{{ void blitz_nl2br() - this code was simply taken from PHP's string.c */
 int blitz_nl2br(
     char **in,
@@ -3033,7 +3043,7 @@ static inline void blitz_exec_var(
         p_result = (char*)memcpy(p_result, Z_STRVAL(p), var_len);
         zval_dtor(&p);
     } else {
-        if (escape_mode == BLITZ_ESCAPE_YES || escape_mode == BLITZ_ESCAPE_NL2BR || ((escape_mode == BLITZ_ESCAPE_DEFAULT) && BLITZ_G(auto_escape))) {
+        if (escape_mode == BLITZ_ESCAPE_YES || escape_mode == BLITZ_ESCAPE_NL2BR || ((escape_mode == BLITZ_ESCAPE_DEFAULT) && blitz_get_autoescape(tpl TSRMLS_CC))) {
 #if defined(ENT_SUBSTITUTE) && defined(ENT_DISALLOWED) && defined(ENT_HTML5)
             long quote_style = ENT_QUOTES | ENT_SUBSTITUTE | ENT_DISALLOWED | ENT_HTML5;
 #else
@@ -5231,7 +5241,48 @@ static PHP_FUNCTION(blitz_get_error)
 }
 /* }}} */
 
+/* {{{ bool Blitz->getAutoEscape() */
+static PHP_FUNCTION(blitz_get_autoescape)
+{
+    zval *id, **desc;
+    blitz_tpl *tpl;
 
+    BLITZ_FETCH_TPL_RESOURCE(id, tpl, desc);
+    if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "|")) {
+        return;
+    }
+
+    RETURN_BOOL(blitz_get_autoescape(tpl TSRMLS_CC));
+}
+/* }}} */
+
+/* {{{ bool Blitz->setAutoEscape() */
+static PHP_FUNCTION(blitz_set_autoescape)
+{
+    zval *id, **desc;
+    blitz_tpl *tpl;
+    zend_bool value;
+    char old_value;
+
+    BLITZ_FETCH_TPL_RESOURCE(id, tpl, desc);
+    if (FAILURE == zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "b|", &value)) {
+        return;
+    }
+
+    if (tpl) {
+        old_value = blitz_get_autoescape(tpl TSRMLS_CC);
+        tpl->flags |= BLITZ_FLAG_AUTOESCAPE_OVERWRITE;
+        if(value) {
+          tpl->flags |= BLITZ_FLAG_AUTOESCAPE_VALUE;
+        } else {
+          tpl->flags &= ~BLITZ_FLAG_AUTOESCAPE_VALUE;
+        }
+        RETURN_BOOL(old_value);
+    } else {
+        RETURN_FALSE;
+    }
+}
+/* }}} */
 
 /* {{{ blitz_functions[] : Blitz class */
 static const zend_function_entry blitz_functions[] = {
@@ -5268,6 +5319,8 @@ static const zend_function_entry blitz_functions[] = {
     PHP_FALIAS(cleanglobals,        blitz_clean_globals,        NULL)
     PHP_FALIAS(geterror,            blitz_get_error,            NULL)
     PHP_FALIAS(get_error,           blitz_get_error,            NULL)
+    PHP_FALIAS(setautoescape,       blitz_set_autoescape,       NULL)
+    PHP_FALIAS(getautoescape,       blitz_get_autoescape,       NULL)
     {NULL, NULL, NULL}
 };
 /* }}} */
